@@ -118,6 +118,6 @@ if __name__ == "__main__":
         print("Please provide a valid Reddit username in the environment variables.\n")
     else:
         u = input("Intel Collection For User:")
-        report_file = 'userdata/user_data'+str(u)+'.json'
+        report_file = 'user_data:'+str(u)+'.json'
         scan_user_comments(u, report_file)
         scan_user_posts(u, report_file)
