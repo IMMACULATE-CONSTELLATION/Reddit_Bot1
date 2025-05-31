@@ -31,7 +31,7 @@ try:
 except FileNotFoundError:
     replied_ids = set()
 
-MODEL_NAME = "deepseek-ai/deepseek-llm-9b-instruct"
+MODEL_NAME = "deepseek-ai/deepseek-llm-67b-chat"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 print("Loading DeepSeek model...")
