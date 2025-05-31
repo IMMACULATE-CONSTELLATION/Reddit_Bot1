@@ -33,10 +33,10 @@ try:
 except FileNotFoundError:
     replied_ids = set()
 
-MODEL_NAME = "microsoft/phi-1_5"
+MODEL_NAME = "deepseek-ai/deepseek-llm-67b-chat"
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-print("Loading Phi-1.5 model...")
+print("Loading LLM model...")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
