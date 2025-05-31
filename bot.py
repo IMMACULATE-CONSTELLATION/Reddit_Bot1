@@ -1,41 +1,39 @@
 import praw
-from dotenv import load_dotenv
-import os
 import time
-import yaml
+import os
 import json
-from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor
+import yaml
+from datetime import datetime
 import threading
+import traceback
 
+from dotenv import load_dotenv
 load_dotenv()
 
-REDDIT_USERNAME = 'REDDIT_USERNAME'
-REDDIT_PASSWORD = 'REDDIT_PASSWORD'
-REDDIT_CLIENT_ID = 'REDDIT_CLIENT_ID'
-REDDIT_CLIENT_SECRET = 'REDDIT_CLIENT_SECRET'
+REDDIT_USERNAME = ""
+REDDIT_PASSWORD = ""
+REDDIT_CLIENT_ID = ""
+REDDIT_CLIENT_SECRET = ""
 
-lock = threading.Lock()
-
-try:
-    reddit = praw.Reddit(
-        client_id=REDDIT_CLIENT_ID,
-        client_secret=REDDIT_CLIENT_SECRET,
-        user_agent='your_user_agent',
-        username=REDDIT_USERNAME,
-        password=REDDIT_PASSWORD
-    )
-    print("Reddit instance initialized successfully. \n")
-except Exception as e:
-    print(f"Failed to initialize Reddit instance: {e} \n")
-    exit(1)
+reddit = praw.Reddit(
+    client_id=REDDIT_CLIENT_ID,
+    client_secret=REDDIT_CLIENT_SECRET,
+    user_agent='Bot_adhd by /u/{}'.format(REDDIT_USERNAME),
+    username=REDDIT_USERNAME,
+    password=REDDIT_PASSWORD
+)
 
 try:
     with open('words.yaml', 'r') as file:
         config = yaml.safe_load(file)
+        trigger_words = config.get('trigger_words', [])
+        if not trigger_words:
+            raise ValueError("No trigger words found in the configuration file.")
 except Exception as e:
-    print(f"Failed to load YAML configuration: {e} \n")
+    print(f"Error loading trigger words: {e}")
     exit(1)
+
+subreddit_names = ["all"]
 
 ids_file = 'scanned_ids.txt'
 report_file = 'report.json'
@@ -46,85 +44,73 @@ try:
 except FileNotFoundError:
     ids = set()
 
-trigger_words = config.get('trigger_words', [])
-subreddit_names = config.get('sub_reddit', [])
-
 def save_ids():
-    """Save Scanned IDs to a file."""
-    with lock:
-        with open(ids_file, 'w') as f:
-            for id in ids:
-                f.write(f"{id}\n")
+    with open(ids_file, 'w') as f:
+        for id in ids:
+            f.write(f"{id}\n")
 
 def write_report(data):
-    """Save report data to a JSON file."""
-    with lock:
-        if os.path.exists(report_file):
-            with open(report_file, 'r') as f:
-                try:
-                    reports = json.load(f)
-                    if not isinstance(reports, list):
-                        reports = []
-                except json.JSONDecodeError:
+    if os.path.exists(report_file):
+        with open(report_file, 'r') as f:
+            try:
+                reports = json.load(f)
+                if not isinstance(reports, list):
                     reports = []
-        else:
-            reports = []
-        reports.append(data)
+            except json.JSONDecodeError:
+                reports = []
+    else:
+        reports = []
+    
+    reports.append(data)
 
-        with open(report_file, 'w') as f:
-            json.dump(reports, f, indent=4)
+    with open(report_file, 'w') as f:
+        json.dump(reports, f, indent=4)
 
-
-
-def scan_comments(subreddit_name):
-    """Process comments in the subreddit and report based on trigger words."""
+def scan_comments():
+    subreddit = reddit.subreddit("all") 
+    print("Bot is running on comments...\n")
     try:
-        subreddit = reddit.subreddit(subreddit_name)
-        print(f"Accessing subreddit: {subreddit.display_name} \n")
-
         for comment in subreddit.stream.comments(skip_existing=True):
             if comment.id not in ids:
                 matched_trigger_words = []
-
                 for trigger_word in trigger_words:
                     if trigger_word in comment.body.lower():
                         matched_trigger_words.append(trigger_word)
 
                 if matched_trigger_words:
-                    if comment.author.name != REDDIT_USERNAME:
+                    if comment.author and comment.author.name != reddit.user.me():
                         try:
                             user = comment.author.name
                             text = comment.body
                             comment_url = f"https://reddit.com{comment.permalink}"
-                            print(f'Comment by {user}: {text} in {subreddit_name} \n')
-                            print(f'Trigger Words: {", ".join(matched_trigger_words)} \n')
-                            print(f'Link: {comment_url} \n')
+                            print(f'Comment by {user}: {text} in {comment.subreddit.display_name}')
+                            print(f'Trigger Words: {", ".join(matched_trigger_words)}')
+                            print(f'Link: {comment_url}\n')
 
                             report_data = {
                                 "type": "comment",
-                                "subreddit": subreddit_name,
+                                "subreddit": comment.subreddit.display_name,
                                 "author": user,
                                 "text": text,
                                 "trigger_words": matched_trigger_words,
                                 "url": comment_url,
                                 "timestamp": str(datetime.utcnow())
                             }
-
                             write_report(report_data)
 
                             ids.add(comment.id)
                             save_ids()
+
                         except Exception as e:
-                            print(f'\n Error scanning comment in {subreddit_name}: {e} \n')
+                            print(f"Error processing comment: {e}")
     except Exception as e:
-        print(f'\n Error accessing subreddit {subreddit_name}: {e} \n')
+        print(f"Error accessing subreddit comments: {e}")
+        raise
 
-def scan_posts(subreddit_name):
-    """Process posts in the subreddit and report based on trigger words."""
+def scan_posts():
+    subreddit = reddit.subreddit("all")
+    print("Bot is running on posts...\n")
     try:
-        subreddit = reddit.subreddit(subreddit_name)
-        print(f"Accessing subreddit: {subreddit.display_name} \n")
-
         for submission in subreddit.stream.submissions(skip_existing=True):
             if submission.id not in ids:
                 matched_trigger_words = []
@@ -133,17 +119,18 @@ def scan_posts(subreddit_name):
                         matched_trigger_words.append(trigger_word)
 
                 if matched_trigger_words:
-                    if submission.author.name != REDDIT_USERNAME:
+                    if submission.author and submission.author.name != reddit.user.me():
                         try:
                             title = submission.title
                             content = submission.selftext if submission.selftext.strip() else "No body text"
                             post_url = f"https://reddit.com{submission.permalink}"
-                            print(f"Post Title: {title} in {subreddit_name} \n")
-                            print(f"Post Body: {content} \n")
-                            print(f"Link: {post_url} \n")
+                            print(f"Post Title: {title} in {submission.subreddit.display_name}")
+                            print(f"Post Body: {content}")
+                            print(f"Link: {post_url}\n")
+
                             report_data = {
                                 "type": "post",
-                                "subreddit": subreddit_name,
+                                "subreddit": submission.subreddit.display_name,
                                 "author": submission.author.name,
                                 "title": title,
                                 "content": content,
@@ -151,26 +138,42 @@ def scan_posts(subreddit_name):
                                 "url": post_url,
                                 "timestamp": str(datetime.utcnow())
                             }
-
                             write_report(report_data)
+
                             ids.add(submission.id)
                             save_ids()
+
                         except Exception as e:
-                            print(f'\n Error scanning posts in {subreddit_name}: {e} \n')
+                            print(f"Error processing post: {e}")
     except Exception as e:
-        print(f'\n Error accessing subreddit {subreddit_name}: {e} \n')
+        print(f"Error accessing subreddit posts: {e}")
+        raise
+
+def run_stream(scan_function):
+    backoff = 1
+    max_backoff = 300
+
+    while True:
+        try:
+            scan_function()
+        except Exception as e:
+            print(f"Error in {scan_function.__name__}: {e}")
+            traceback.print_exc()
+            if '429' in str(e):
+                print(f"Rate limited, backing off for {backoff} seconds...")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
+            else:
+                time.sleep(5)
+        else:
+            backoff = 1
 
 if __name__ == "__main__":
-    print('Bot is running... \n')
+    comment_thread = threading.Thread(target=run_stream, args=(scan_comments,), daemon=True)
+    post_thread = threading.Thread(target=run_stream, args=(scan_posts,), daemon=True)
+
+    comment_thread.start()
+    post_thread.start()
+
     while True:
-        with ThreadPoolExecutor(max_workers=len(subreddit_names) * 2) as executor:
-            futures = []
-            for name in subreddit_names:
-                futures.append(executor.submit(scan_comments, name))
-                futures.append(executor.submit(scan_posts, name))
-            for future in futures:
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f'Error in bot loop: {e} \n')
-        time.sleep(0.001)
+        time.sleep(60)
